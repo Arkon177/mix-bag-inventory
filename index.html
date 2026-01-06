@@ -58,6 +58,9 @@
                 <button class="tab-btn" data-tab="boxes">
                     <span>📦</span> Boxes
                 </button>
+                <button class="tab-btn" data-tab="tasks">
+                    <span>✓</span> Tasks
+                </button>
             </div>
 
             <!-- Bags Tab -->
@@ -104,6 +107,39 @@
                     <div class="table-empty" id="boxesEmptyState">
                         <span class="empty-icon">📭</span>
                         <p>No boxes yet. Click "Add Flavour" to get started!</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tasks Tab -->
+            <section class="inventory-section tab-content" id="tasksTab">
+                <div class="tasks-container glass-card">
+                    <!-- Add Task Form -->
+                    <div class="add-task-form">
+                        <input type="text" id="newTaskInput" placeholder="Add a new task..." class="task-input">
+                        <button id="addTaskBtn" class="btn btn-primary">
+                            <span class="btn-icon">+</span> Add
+                        </button>
+                    </div>
+
+                    <!-- Pending Tasks -->
+                    <div class="tasks-section">
+                        <h3 class="tasks-header">📝 To Do</h3>
+                        <ul class="task-list" id="pendingTasksList">
+                            <!-- Dynamic content -->
+                        </ul>
+                        <div class="table-empty" id="tasksEmptyState">
+                            <span class="empty-icon">✨</span>
+                            <p>No tasks yet. Add one above!</p>
+                        </div>
+                    </div>
+
+                    <!-- Completed Tasks -->
+                    <div class="tasks-section completed-section">
+                        <h3 class="tasks-header">✅ Completed</h3>
+                        <ul class="task-list completed-list" id="completedTasksList">
+                            <!-- Dynamic content -->
+                        </ul>
                     </div>
                 </div>
             </section>
