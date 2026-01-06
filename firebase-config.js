@@ -48,6 +48,7 @@ const FirebaseStorage = {
                 transactions: data.transactions || [],
                 boxes: data.boxes || [],
                 boxTransactions: data.boxTransactions || [],
+                tasks: data.tasks || [],
                 settings: data.settings || { reorderThreshold: 1000 },
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             });
