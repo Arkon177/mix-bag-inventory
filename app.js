@@ -3,7 +3,7 @@
  * A simple inventory management application
  */
 
-const APP_VERSION = '2.1.2';
+const APP_VERSION = '2.1.3';
 
 // ===========================================
 // Default Flavours
@@ -317,11 +317,12 @@ const Inventory = {
             productId,
             productName: product.name,
             quantity: parseInt(quantity, 10),
-            type: type, // 'used' or 'ordered'
+            type: type, // 'used' or 'ordered' or 'adjustment'
             date: new Date().toISOString()
         };
         state.transactions.push(transaction);
-        Storage.save(STORAGE_KEYS.TRANSACTIONS, state.transactions);
+        console.log(`📝 Recorded transaction: ${type} ${quantity} × ${product.name}. Total: ${state.transactions.length}`);
+        Storage.saveAll(); // Save AND sync to cloud
         return transaction;
     },
 
@@ -428,11 +429,12 @@ const Inventory = {
             boxId,
             boxName: box.name,
             quantity: parseInt(quantity, 10),
-            type: type, // 'used' or 'made'
+            type: type, // 'used' or 'made' or 'adjustment'
             date: new Date().toISOString()
         };
         state.boxTransactions.push(transaction);
-        Storage.save(STORAGE_KEYS.BOX_TRANSACTIONS, state.boxTransactions);
+        console.log(`📝 Recorded box transaction: ${type} ${quantity} × ${box.name}. Total: ${state.boxTransactions.length}`);
+        Storage.saveAll(); // Save AND sync to cloud
         return transaction;
     },
 
@@ -1296,6 +1298,15 @@ const Handlers = {
 document.addEventListener('DOMContentLoaded', async () => {
     // Load saved data from localStorage first (instant)
     Storage.loadAll();
+
+    // Debug: log what we loaded from localStorage
+    console.log('📂 Loaded from localStorage:', {
+        products: state.products.length,
+        transactions: state.transactions.length,
+        boxes: state.boxes.length,
+        boxTransactions: state.boxTransactions.length,
+        tasks: state.tasks.length
+    });
 
     // Initialize UI
     UI.init();
