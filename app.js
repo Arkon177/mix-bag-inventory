@@ -3,7 +3,7 @@
  * A simple inventory management application
  */
 
-const APP_VERSION = '2.1.3';
+const APP_VERSION = '2.1.4';
 
 // ===========================================
 // Default Flavours
@@ -331,7 +331,8 @@ const Inventory = {
         if (state.transactions.length === 0) return null;
 
         const lastTransaction = state.transactions.pop();
-        Storage.save(STORAGE_KEYS.TRANSACTIONS, state.transactions);
+        console.log(`↩️ Undid transaction. Total now: ${state.transactions.length}`);
+        Storage.saveAll(); // Sync to cloud too!
         return lastTransaction;
     },
 
@@ -442,7 +443,8 @@ const Inventory = {
     undoLastBoxTransaction() {
         if (state.boxTransactions.length === 0) return null;
         const lastTransaction = state.boxTransactions.pop();
-        Storage.save(STORAGE_KEYS.BOX_TRANSACTIONS, state.boxTransactions);
+        console.log(`↩️ Undid box transaction. Total now: ${state.boxTransactions.length}`);
+        Storage.saveAll(); // Sync to cloud too!
         return lastTransaction;
     },
 
