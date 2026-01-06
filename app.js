@@ -3,7 +3,7 @@
  * A simple inventory management application
  */
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '2.0.0';
 
 // ===========================================
 // Default Flavours
@@ -59,9 +59,12 @@ const STORAGE_KEYS = {
 };
 
 // ===========================================
-// Data Layer
+// Data Layer (with Firebase Cloud Sync)
 // ===========================================
 const Storage = {
+    // Flag to track if cloud sync is enabled
+    cloudEnabled: typeof FirebaseStorage !== 'undefined',
+
     save(key, data) {
         try {
             localStorage.setItem(key, JSON.stringify(data));
@@ -80,7 +83,9 @@ const Storage = {
         }
     },
 
+    // Load from local storage first, then sync with cloud
     loadAll() {
+        // Load from localStorage first (instant)
         state.products = Storage.load(STORAGE_KEYS.PRODUCTS) || [];
         state.transactions = Storage.load(STORAGE_KEYS.TRANSACTIONS) || [];
         state.boxes = Storage.load(STORAGE_KEYS.BOXES) || [];
@@ -111,12 +116,64 @@ const Storage = {
         }
     },
 
+    // Save to both local and cloud
     saveAll() {
+        // Save to localStorage (instant, works offline)
         Storage.save(STORAGE_KEYS.PRODUCTS, state.products);
         Storage.save(STORAGE_KEYS.TRANSACTIONS, state.transactions);
         Storage.save(STORAGE_KEYS.BOXES, state.boxes);
         Storage.save(STORAGE_KEYS.BOX_TRANSACTIONS, state.boxTransactions);
         Storage.save(STORAGE_KEYS.SETTINGS, state.settings);
+
+        // Sync to cloud if available
+        Storage.syncToCloud();
+    },
+
+    // Sync current state to cloud
+    syncToCloud() {
+        if (this.cloudEnabled && window.FirebaseStorage) {
+            FirebaseStorage.saveToCloud({
+                products: state.products,
+                transactions: state.transactions,
+                boxes: state.boxes,
+                boxTransactions: state.boxTransactions,
+                settings: state.settings
+            });
+        }
+    },
+
+    // Apply data from cloud to local state
+    applyCloudData(data) {
+        if (data.products) state.products = data.products;
+        if (data.transactions) state.transactions = data.transactions;
+        if (data.boxes) state.boxes = data.boxes;
+        if (data.boxTransactions) state.boxTransactions = data.boxTransactions;
+        if (data.settings) state.settings = data.settings;
+
+        // Save to localStorage for offline access
+        Storage.save(STORAGE_KEYS.PRODUCTS, state.products);
+        Storage.save(STORAGE_KEYS.TRANSACTIONS, state.transactions);
+        Storage.save(STORAGE_KEYS.BOXES, state.boxes);
+        Storage.save(STORAGE_KEYS.BOX_TRANSACTIONS, state.boxTransactions);
+        Storage.save(STORAGE_KEYS.SETTINGS, state.settings);
+
+        // Refresh UI
+        if (typeof UI !== 'undefined' && UI.refresh) {
+            UI.refresh();
+        }
+    },
+
+    // Start real-time sync with cloud
+    startCloudSync() {
+        if (this.cloudEnabled && window.FirebaseStorage) {
+            console.log('🔥 Starting Firebase real-time sync...');
+            FirebaseStorage.startRealtimeSync((cloudData) => {
+                Storage.applyCloudData(cloudData);
+                if (typeof UI !== 'undefined') {
+                    UI.showToast('Synced from another device', 'info');
+                }
+            });
+        }
     },
 
     clearAll() {
@@ -130,6 +187,9 @@ const Storage = {
         state.boxes = [];
         state.boxTransactions = [];
         state.settings = { reorderThreshold: 1000 };
+
+        // Also clear cloud data
+        Storage.syncToCloud();
     },
 
     exportData() {
@@ -971,8 +1031,8 @@ const Handlers = {
 // ===========================================
 // Application Bootstrap
 // ===========================================
-document.addEventListener('DOMContentLoaded', () => {
-    // Load saved data
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load saved data from localStorage first (instant)
     Storage.loadAll();
 
     // Initialize UI
@@ -993,5 +1053,25 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch((error) => {
                 console.log('ServiceWorker registration failed:', error);
             });
+    }
+
+    // Initialize Firebase cloud sync
+    if (window.FirebaseStorage) {
+        // Check if cloud has data
+        const cloudData = await FirebaseStorage.loadFromCloud();
+
+        if (cloudData && cloudData.products && cloudData.products.length > 0) {
+            // Cloud has data - use it
+            Storage.applyCloudData(cloudData);
+            console.log('📥 Loaded data from cloud');
+        } else if (state.products.length > 0) {
+            // No cloud data but we have local data - upload it
+            Storage.syncToCloud();
+            console.log('📤 Uploaded local data to cloud');
+        }
+
+        // Start real-time sync for future changes
+        Storage.startCloudSync();
+        UI.showToast('☁️ Cloud sync enabled', 'success');
     }
 });
