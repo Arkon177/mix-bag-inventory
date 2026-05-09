@@ -227,51 +227,63 @@ app.post('/api/chat', async (req, res) => {
       });
       const products = prodRes.data.products || [];
 
-      // 2. See if the user is asking about a specific product
-      const matchPrompt = `Which product is this question about? Output ONLY the Product ID or "none": "${message}"\n\nOptions:\n${products.map(p => `${p.title}: ${p.id}`).join('\n')}`;
-      let matchedId = null;
+      // 2. See if the user is asking about a specific product OR CATEGORY
+      const matchPrompt = `Which products from this list are related to this question: "${message}"? Output ONLY a comma-separated list of IDs, or "none". \n\nOptions:\n${products.map(p => `${p.title}: ${p.id}`).join('\n')}`;
+      let matchedIds = [];
       try {
         const matchResult = await model.generateContent(matchPrompt);
         const matchText = matchResult.response.text().trim();
-        if (matchText !== 'none' && matchText.match(/^\d+$/)) matchedId = matchText;
+        if (matchText !== 'none') {
+            matchedIds = matchText.split(',').map(id => id.trim()).filter(id => id.match(/^\d+$/));
+        }
       } catch (e) { console.error('Product matching failed'); }
 
-      // 3. If matched, fetch ALL orders for that product
-      if (matchedId) {
-        console.log('Targeted scan for product ID:', matchedId);
-        const targetOrdersRes = await axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&product_id=${matchedId}&fields=line_items`, {
-          headers: getShopifyHeaders()
+      // 3. If matched, fetch ALL orders for ALL those products
+      if (matchedIds.length > 0) {
+        console.log('Targeted scan for product IDs:', matchedIds);
+        
+        // We'll fetch orders for the first 5 matched products to keep it fast
+        const fetches = matchedIds.slice(0, 5).map(id => 
+            axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&product_id=${id}&fields=line_items`, {
+                headers: getShopifyHeaders(),
+                timeout: 10000
+            }).catch(() => ({ data: { orders: [] } }))
+        );
+
+        const results = await Promise.all(fetches);
+        const allTargetedOrders = results.flatMap(r => r.data.orders || []);
+        
+        const stats = {};
+        allTargetedOrders.forEach(o => {
+          o.line_items?.forEach(item => {
+            if (item.product_id && matchedIds.includes(item.product_id.toString())) {
+                const name = item.title;
+                stats[name] = (stats[name] || 0) + (item.quantity || 0);
+            }
+          });
         });
-        const tOrders = targetOrdersRes.data.orders || [];
-        let totalQty = 0;
-        tOrders.forEach(o => {
-          if (o.line_items) {
-            o.line_items.forEach(item => {
-              if (item.product_id && item.product_id.toString() === matchedId) {
-                totalQty += (item.quantity || 0);
-              }
-            });
-          }
-        });
-        dataContext.targeted_data = {
-          name: products.find(p => p.id.toString() === matchedId)?.title,
-          lifetime_sold: totalQty
-        };
-        // Optimization: If we found what we wanted, skip the slow general scan!
+
+        dataContext.targeted_data = stats;
+        // Skip general scan if we have targeted stats
         return respondWithData(dataContext, message, res);
       }
 
       // 4. General Scan (only if no targeted match)
       if (!global.analystCache) global.analystCache = { data: null, lastFetched: 0 };
       const now = Date.now();
-      if (global.analystCache.data && (now - global.analystCache.lastFetched < 10 * 60 * 1000)) {
+      if (global.analystCache.data && (now - global.analystCache.lastFetched < 15 * 60 * 1000)) {
         dataContext.summary = global.analystCache.data.summary;
       } else {
-        console.log('Cache empty/old. Scanning last 1000 orders...');
+        console.log('Cache empty. Scanning last 500 orders...');
         let orders = [];
         let nextUrl = `${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&fields=total_price,line_items`;
-        for (let i = 0; i < 4; i++) {
-          const r = await axios.get(nextUrl, { headers: getShopifyHeaders() });
+        
+        // Only 2 pages (500 orders) to stay within Render memory limits
+        for (let i = 0; i < 2; i++) {
+          const r = await axios.get(nextUrl, { 
+            headers: getShopifyHeaders(),
+            timeout: 15000 
+          });
           orders = orders.concat(r.data.orders || []);
           const link = r.headers['link'];
           if (link && link.includes('rel="next"')) {
@@ -279,11 +291,14 @@ app.post('/api/chat', async (req, res) => {
             if (match) nextUrl = match[1]; else break;
           } else break;
         }
+
         orders.forEach(o => {
           dataContext.summary.total_orders++;
           dataContext.summary.total_revenue += parseFloat(o.total_price || 0);
           o.line_items?.forEach(item => {
-            dataContext.summary.top_products[item.title] = (dataContext.summary.top_products[item.title] || 0) + (item.quantity || 0);
+            if (item.title) {
+              dataContext.summary.top_products[item.title] = (dataContext.summary.top_products[item.title] || 0) + (item.quantity || 0);
+            }
           });
         });
         global.analystCache = { data: dataContext, lastFetched: now };
@@ -307,8 +322,13 @@ Question: ${message}
 Answer:`;
 
   if (process.env.GEMINI_API_KEY) {
-    const result = await model.generateContent(finalPrompt);
-    res.json({ answer: result.response.text() });
+    try {
+      const result = await model.generateContent(finalPrompt);
+      res.json({ answer: result.response.text() });
+    } catch (e) {
+      console.error('Gemini call failed:', e.message);
+      res.json({ answer: "I'm sorry, I've hit my daily limit for AI questions. Please try again tomorrow or upgrade your Gemini API key in AI Studio!" });
+    }
   } else {
     res.json({ answer: "Gemini API key missing." });
   }
