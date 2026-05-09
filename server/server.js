@@ -213,74 +213,78 @@ app.post('/api/chat', async (req, res) => {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
-console.log('Analyst processing question:', message);
-
-    // Global Cache variables
-    if (!global.analystCache) {
-      global.analystCache = { data: null, lastFetched: 0 };
-    }
-
-    const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
-    const now = Date.now();
-
-    if (global.analystCache.data && (now - global.analystCache.lastFetched < CACHE_DURATION)) {
-      console.log('Using cached data for Analyst');
-      return respondWithData(global.analystCache.data, message, res);
-    }
+    console.log('Analyst processing question:', message);
 
     const dataContext = {
       summary: { total_orders: 0, total_revenue: 0, top_products: {} },
-      recent_activity: []
+      targeted_data: null
     };
 
     if (process.env.SHOPIFY_STORE_URL && process.env.SHOPIFY_ACCESS_TOKEN) {
-      console.log('Cache expired or empty. Deep scanning Shopify...');
-      let orders = [];
-      let nextUrl = `${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&fields=created_at,total_price,line_items`;
-
-      // Fetch up to 8 pages (2000 orders) for full history
-      for (let i = 0; i < 8; i++) {
-        const response = await axios.get(nextUrl, { headers: getShopifyHeaders() });
-        const pageOrders = response.data.orders || [];
-        orders = orders.concat(pageOrders);
-
-        const linkHeader = response.headers['link'];
-        if (linkHeader && linkHeader.includes('rel="next"')) {
-          const match = linkHeader.match(/<(.*?)>;\s*rel="next"/);
-          if (match) nextUrl = match[1]; else break;
-        } else break;
-      }
-
-      orders.forEach(order => {
-        dataContext.summary.total_orders++;
-        dataContext.summary.total_revenue += parseFloat(order.total_price || 0);
-        if (order.line_items) {
-          order.line_items.forEach(item => {
-            dataContext.summary.top_products[item.title] = (dataContext.summary.top_products[item.title] || 0) + (item.quantity || 0);
-          });
-        }
-      });
-
-      dataContext.recent_activity = orders.slice(0, 10).map(o => ({
-        date: o.created_at.split('T')[0],
-        total: o.total_price,
-        items: o.line_items?.map(i => i.title).join(', ')
-      }));
-
-      const prodRes = await axios.get(`${SHOPIFY_BASE_URL}/products.json?limit=50&fields=title,variants`, {
+      // 1. Get products list to match names
+      const prodRes = await axios.get(`${SHOPIFY_BASE_URL}/products.json?limit=250&fields=id,title`, {
         headers: getShopifyHeaders()
       });
-      dataContext.inventory = prodRes.data.products.map(p => ({
-        name: p.title,
-        stock: p.variants.reduce((acc, v) => acc + (v.inventory_quantity || 0), 0)
-      }));
+      const products = prodRes.data.products || [];
 
-      // Update Cache
-      global.analystCache = { data: dataContext, lastFetched: now };
+      // 2. See if the user is asking about a specific product
+      const matchPrompt = `Which product is this question about? Output ONLY the Product ID or "none": "${message}"\n\nOptions:\n${products.map(p => `${p.title}: ${p.id}`).join('\n')}`;
+      let matchedId = null;
+      try {
+        const matchResult = await model.generateContent(matchPrompt);
+        const matchText = matchResult.response.text().trim();
+        if (matchText !== 'none' && matchText.match(/^\d+$/)) matchedId = matchText;
+      } catch (e) { console.error('Product matching failed'); }
+
+      // 3. If matched, fetch ALL orders for that product
+      if (matchedId) {
+        console.log('Targeted scan for product ID:', matchedId);
+        const targetOrdersRes = await axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&product_id=${matchedId}&fields=line_items`, {
+          headers: getShopifyHeaders()
+        });
+        const tOrders = targetOrdersRes.data.orders || [];
+        let totalQty = 0;
+        tOrders.forEach(o => {
+          o.line_items.forEach(item => {
+            if (item.product_id.toString() === matchedId) totalQty += item.quantity;
+          });
+        });
+        dataContext.targeted_data = {
+          name: products.find(p => p.id.toString() === matchedId)?.title,
+          lifetime_sold: totalQty
+        };
+      }
+
+      // 4. General Scan (using cache if available)
+      if (!global.analystCache) global.analystCache = { data: null, lastFetched: 0 };
+      const now = Date.now();
+      if (global.analystCache.data && (now - global.analystCache.lastFetched < 10 * 60 * 1000)) {
+        dataContext.summary = global.analystCache.data.summary;
+      } else {
+        console.log('Cache empty/old. Scanning last 1000 orders...');
+        let orders = [];
+        let nextUrl = `${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&fields=total_price,line_items`;
+        for (let i = 0; i < 4; i++) {
+          const r = await axios.get(nextUrl, { headers: getShopifyHeaders() });
+          orders = orders.concat(r.data.orders || []);
+          const link = r.headers['link'];
+          if (link && link.includes('rel="next"')) {
+            const match = link.match(/<(.*?)>;\s*rel="next"/);
+            if (match) nextUrl = match[1]; else break;
+          } else break;
+        }
+        orders.forEach(o => {
+          dataContext.summary.total_orders++;
+          dataContext.summary.total_revenue += parseFloat(o.total_price || 0);
+          o.line_items?.forEach(item => {
+            dataContext.summary.top_products[item.title] = (dataContext.summary.top_products[item.title] || 0) + (item.quantity || 0);
+          });
+        });
+        global.analystCache = { data: dataContext, lastFetched: now };
+      }
     }
 
     return respondWithData(dataContext, message, res);
-
   } catch (error) {
     console.error('ERROR:', error);
     res.status(500).json({ error: `Analyst Error: ${error.message}` });
