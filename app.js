@@ -590,7 +590,10 @@ const AIEditor = {
         isProcessing: false,
         backendUrl: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
             ? 'http://localhost:3000' 
-            : 'https://mix-bag-inventory.onrender.com'
+            : 'https://mix-bag-inventory.onrender.com',
+        allProducts: [],
+        bulkDrafts: [],
+        mode: 'single'
     },
 
     init() {
@@ -605,6 +608,32 @@ const AIEditor = {
 
         UI.elements.approveDraftBtn.addEventListener('click', () => this.handleApprove());
         UI.elements.discardDraftBtn.addEventListener('click', () => this.handleDiscard());
+        
+        UI.elements.approveBulkBtn.addEventListener('click', () => this.handleApproveBulk());
+        UI.elements.discardBulkBtn.addEventListener('click', () => this.handleDiscardBulk());
+
+        UI.elements.aiEditModeRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                this.state.mode = e.target.value;
+                if (this.state.mode === 'single') {
+                    UI.elements.singleProductSelector.style.display = 'block';
+                    UI.elements.categorySelector.style.display = 'none';
+                    UI.elements.singleDraftActions.style.display = 'flex';
+                    UI.elements.bulkDraftActions.style.display = 'none';
+                    UI.elements.originalHtmlPreview.innerHTML = '(No product selected)';
+                    UI.elements.draftHtmlPreview.innerHTML = '(Awaiting draft)';
+                    UI.elements.draftSection.classList.remove('active');
+                } else {
+                    UI.elements.singleProductSelector.style.display = 'none';
+                    UI.elements.categorySelector.style.display = 'block';
+                    UI.elements.singleDraftActions.style.display = 'none';
+                    UI.elements.bulkDraftActions.style.display = 'none';
+                    UI.elements.originalHtmlPreview.innerHTML = '(Category selected. Preview disabled in bulk mode.)';
+                    UI.elements.draftHtmlPreview.innerHTML = '(Awaiting bulk drafts...)';
+                    UI.elements.draftSection.classList.remove('active');
+                }
+            });
+        });
     },
 
     async loadProducts() {
@@ -613,24 +642,44 @@ const AIEditor = {
             if (!res.ok) throw new Error('Failed to load products');
             const data = await res.json();
             
-            const select = UI.elements.aiProductSelect;
-            if (!select) return;
+            this.state.allProducts = data.products || [];
             
-            select.innerHTML = '<option value="">-- Select a Product --</option>';
-            if (data.products && data.products.length > 0) {
-                data.products.forEach(p => {
+            const prodSelect = UI.elements.aiProductSelect;
+            const catSelect = UI.elements.aiCategorySelect;
+            if (!prodSelect || !catSelect) return;
+            
+            prodSelect.innerHTML = '<option value="">-- Select a Product --</option>';
+            catSelect.innerHTML = '<option value="">-- Select a Category --</option>';
+            
+            const categories = new Set();
+
+            if (this.state.allProducts.length > 0) {
+                this.state.allProducts.forEach(p => {
                     const option = document.createElement('option');
                     option.value = p.id;
                     option.textContent = p.title;
-                    select.appendChild(option);
+                    prodSelect.appendChild(option);
+                    
+                    if (p.product_type) {
+                        categories.add(p.product_type);
+                    }
+                });
+                
+                Array.from(categories).sort().forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat;
+                    option.textContent = cat;
+                    catSelect.appendChild(option);
                 });
             } else {
-                select.innerHTML = '<option value="">No products found</option>';
+                prodSelect.innerHTML = '<option value="">No products found</option>';
+                catSelect.innerHTML = '<option value="">No categories found</option>';
             }
         } catch (error) {
             console.error('Error loading products:', error);
             if (UI.elements.aiProductSelect) {
                 UI.elements.aiProductSelect.innerHTML = '<option value="">Error loading products</option>';
+                UI.elements.aiCategorySelect.innerHTML = '<option value="">Error loading categories</option>';
             }
         }
     },
@@ -646,10 +695,26 @@ const AIEditor = {
     async handleSend() {
         if (this.state.isProcessing) return;
         
-        const productId = UI.elements.aiProductSelect.value;
-        if (!productId) {
-            this.appendMessage('Please select a target product from the dropdown first.', false);
-            return;
+        let targetProducts = [];
+        
+        if (this.state.mode === 'single') {
+            const productId = UI.elements.aiProductSelect.value;
+            if (!productId) {
+                this.appendMessage('Please select a target product from the dropdown first.', false);
+                return;
+            }
+            targetProducts.push({ id: productId, title: UI.elements.aiProductSelect.options[UI.elements.aiProductSelect.selectedIndex].text });
+        } else {
+            const category = UI.elements.aiCategorySelect.value;
+            if (!category) {
+                this.appendMessage('Please select a target category from the dropdown first.', false);
+                return;
+            }
+            targetProducts = this.state.allProducts.filter(p => p.product_type === category);
+            if (targetProducts.length === 0) {
+                this.appendMessage('No products found in this category.', false);
+                return;
+            }
         }
 
         const text = UI.elements.aiChatInput.value.trim();
@@ -662,7 +727,7 @@ const AIEditor = {
         this.appendMessage('Thinking...', false);
 
         try {
-            // 1. Interpret
+            // 1. Interpret (Do this once for both single and bulk)
             let res = await fetch(`${this.state.backendUrl}/api/interpret`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -674,54 +739,114 @@ const AIEditor = {
             
             if (interpretData.error) throw new Error(interpretData.error);
             
-            this.appendMessage(`Fetching product details...`, false);
-
-            // 2. Retrieval
-            res = await fetch(`${this.state.backendUrl}/api/shopify/product?id=${encodeURIComponent(productId)}`);
-            const productData = await res.json();
-
-            if (productData.error) throw new Error(productData.error);
-
-            this.appendMessage(`Found product! Generating draft...`, false);
-            
-            // Render original HTML
-            UI.elements.originalHtmlPreview.innerHTML = productData.body_html || '(Empty)';
-
-            // 3. Draft
-            res = await fetch(`${this.state.backendUrl}/api/draft`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    body_html: productData.body_html,
-                    raw_instructions: interpretData.raw_instructions,
-                    intent: interpretData.intent
-                })
-            });
-            const draftRes = await res.json();
-
-            if (draftRes.error) throw new Error(draftRes.error);
-
-            // Render draft HTML
-            UI.elements.draftHtmlPreview.innerHTML = draftRes.draft_html;
-            UI.elements.draftSection.classList.add('active');
-
-            // Save state
-            this.state.draftData = {
-                id: productData.id,
-                body_html: draftRes.draft_html
-            };
-
-            // Remove status messages
-            this.clearStatusMessages();
-            this.appendMessage('I have prepared a draft. Please review it on the right side and Approve or Discard.', false);
+            if (this.state.mode === 'single') {
+                await this.processSingleDraft(targetProducts[0].id, interpretData);
+            } else {
+                await this.processBulkDrafts(targetProducts, interpretData);
+            }
 
         } catch (error) {
-            console.error(error);
+            console.error('Error in AI Workflow:', error);
             this.clearStatusMessages();
             this.appendMessage(`Error: ${error.message}`, false);
-        } finally {
             this.state.isProcessing = false;
         }
+    },
+
+    async processSingleDraft(productId, interpretData) {
+        this.appendMessage(`Fetching product details...`, false);
+
+        let res = await fetch(`${this.state.backendUrl}/api/shopify/product?id=${encodeURIComponent(productId)}`);
+        const productData = await res.json();
+
+        if (productData.error) throw new Error(productData.error);
+
+        this.appendMessage(`Found product! Generating draft...`, false);
+        
+        UI.elements.originalHtmlPreview.innerHTML = productData.body_html || '(Empty)';
+
+        res = await fetch(`${this.state.backendUrl}/api/draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                body_html: productData.body_html,
+                raw_instructions: interpretData.raw_instructions,
+                intent: interpretData.intent
+            })
+        });
+        const draftRes = await res.json();
+
+        if (draftRes.error) throw new Error(draftRes.error);
+
+        UI.elements.draftHtmlPreview.innerHTML = draftRes.draft_html;
+        UI.elements.draftSection.classList.add('active');
+
+        this.state.draftData = {
+            id: productData.id,
+            body_html: draftRes.draft_html
+        };
+
+        this.clearStatusMessages();
+        this.appendMessage('I have prepared a draft. Please review it on the right side and Approve or Discard.', false);
+        this.state.isProcessing = false;
+    },
+
+    async processBulkDrafts(targetProducts, interpretData) {
+        UI.elements.aiProgressBarContainer.style.display = 'block';
+        this.state.bulkDrafts = [];
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < targetProducts.length; i++) {
+            const product = targetProducts[i];
+            const percent = Math.round((i / targetProducts.length) * 100);
+            UI.elements.aiProgressBar.style.width = `${percent}%`;
+            UI.elements.aiProgressText.textContent = `Drafting ${i + 1} of ${targetProducts.length}... (${product.title})`;
+            
+            try {
+                let res = await fetch(`${this.state.backendUrl}/api/shopify/product?id=${encodeURIComponent(product.id)}`);
+                const productData = await res.json();
+                if (productData.error) throw new Error(productData.error);
+
+                res = await fetch(`${this.state.backendUrl}/api/draft`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        body_html: productData.body_html,
+                        raw_instructions: interpretData.raw_instructions,
+                        intent: interpretData.intent
+                    })
+                });
+                const draftRes = await res.json();
+                if (draftRes.error) throw new Error(draftRes.error);
+
+                this.state.bulkDrafts.push({
+                    id: product.id,
+                    title: product.title,
+                    body_html: draftRes.draft_html
+                });
+                successCount++;
+            } catch (err) {
+                console.error(`Failed to draft for product ${product.id}`, err);
+                failCount++;
+            }
+        }
+
+        UI.elements.aiProgressBar.style.width = `100%`;
+        UI.elements.aiProgressText.textContent = `Complete!`;
+        setTimeout(() => {
+            UI.elements.aiProgressBarContainer.style.display = 'none';
+        }, 2000);
+
+        this.clearStatusMessages();
+        this.appendMessage(`Bulk drafting complete. Prepared drafts for ${successCount} products. ${failCount > 0 ? `(${failCount} failed). ` : ''}Click 'Approve All' to push these changes live to Shopify.`, false);
+        
+        UI.elements.bulkDraftCount.textContent = successCount;
+        UI.elements.singleDraftActions.style.display = 'none';
+        UI.elements.bulkDraftActions.style.display = 'flex';
+        UI.elements.draftSection.classList.add('active');
+
+        this.state.isProcessing = false;
     },
 
     clearStatusMessages() {
@@ -766,11 +891,65 @@ const AIEditor = {
         this.resetDraftView();
     },
 
+    async handleApproveBulk() {
+        if (!this.state.bulkDrafts || this.state.bulkDrafts.length === 0 || this.state.isProcessing) return;
+        this.state.isProcessing = true;
+        this.appendMessage(`Pushing ${this.state.bulkDrafts.length} changes live to Shopify...`, false);
+        
+        UI.elements.aiProgressBarContainer.style.display = 'block';
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < this.state.bulkDrafts.length; i++) {
+            const draft = this.state.bulkDrafts[i];
+            const percent = Math.round((i / this.state.bulkDrafts.length) * 100);
+            UI.elements.aiProgressBar.style.width = `${percent}%`;
+            UI.elements.aiProgressText.textContent = `Pushing ${i + 1} of ${this.state.bulkDrafts.length}... (${draft.title})`;
+
+            try {
+                const res = await fetch(`${this.state.backendUrl}/api/shopify/update`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(draft)
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                successCount++;
+            } catch (err) {
+                console.error(`Failed to push draft for ${draft.id}`, err);
+                failCount++;
+            }
+        }
+
+        UI.elements.aiProgressBar.style.width = `100%`;
+        UI.elements.aiProgressText.textContent = `Complete!`;
+        setTimeout(() => {
+            UI.elements.aiProgressBarContainer.style.display = 'none';
+        }, 2000);
+
+        this.clearStatusMessages();
+        this.appendMessage(`Bulk update complete! Successfully pushed ${successCount} products live to Shopify. ${failCount > 0 ? `(${failCount} failed).` : ''}`, false);
+        
+        this.state.isProcessing = false;
+        this.resetDraftView();
+    },
+
+    handleDiscardBulk() {
+        this.appendMessage('Bulk drafts discarded, no changes made.', false);
+        this.resetDraftView();
+    },
+
     resetDraftView() {
         this.state.draftData = null;
+        this.state.bulkDrafts = [];
         UI.elements.draftSection.classList.remove('active');
-        UI.elements.originalHtmlPreview.innerHTML = '(No product selected)';
-        UI.elements.draftHtmlPreview.innerHTML = '(Awaiting draft)';
+        if (this.state.mode === 'single') {
+            UI.elements.originalHtmlPreview.innerHTML = '(No product selected)';
+            UI.elements.draftHtmlPreview.innerHTML = '(Awaiting draft)';
+        } else {
+            UI.elements.originalHtmlPreview.innerHTML = '(Category selected. Preview disabled in bulk mode.)';
+            UI.elements.draftHtmlPreview.innerHTML = '(Awaiting bulk drafts...)';
+        }
     }
 };
 
@@ -849,15 +1028,27 @@ const UI = {
 
             // AI Editor
             aiEditorTab: document.getElementById('aiEditorTab'),
+            aiEditModeRadios: document.getElementsByName('aiEditMode'),
+            singleProductSelector: document.getElementById('singleProductSelector'),
+            categorySelector: document.getElementById('categorySelector'),
             aiProductSelect: document.getElementById('aiProductSelect'),
+            aiCategorySelect: document.getElementById('aiCategorySelect'),
+            aiProgressBarContainer: document.getElementById('aiProgressBarContainer'),
+            aiProgressBar: document.getElementById('aiProgressBar'),
+            aiProgressText: document.getElementById('aiProgressText'),
             chatHistory: document.getElementById('chatHistory'),
             aiChatInput: document.getElementById('aiChatInput'),
             aiSendBtn: document.getElementById('aiSendBtn'),
             draftSection: document.getElementById('draftSection'),
             originalHtmlPreview: document.getElementById('originalHtmlPreview'),
             draftHtmlPreview: document.getElementById('draftHtmlPreview'),
+            singleDraftActions: document.getElementById('singleDraftActions'),
+            bulkDraftActions: document.getElementById('bulkDraftActions'),
+            bulkDraftCount: document.getElementById('bulkDraftCount'),
             approveDraftBtn: document.getElementById('approveDraftBtn'),
-            discardDraftBtn: document.getElementById('discardDraftBtn')
+            discardDraftBtn: document.getElementById('discardDraftBtn'),
+            approveBulkBtn: document.getElementById('approveBulkBtn'),
+            discardBulkBtn: document.getElementById('discardBulkBtn')
         };
 
         // Display version
