@@ -582,6 +582,197 @@ const Tasks = {
 };
 
 // ===========================================
+// AI Editor Logic
+// ===========================================
+const AIEditor = {
+    state: {
+        draftData: null,
+        isProcessing: false,
+        backendUrl: 'http://localhost:3000'
+    },
+
+    init() {
+        if (!UI.elements.aiSendBtn) return;
+
+        this.loadProducts();
+
+        UI.elements.aiSendBtn.addEventListener('click', () => this.handleSend());
+        UI.elements.aiChatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.handleSend();
+        });
+
+        UI.elements.approveDraftBtn.addEventListener('click', () => this.handleApprove());
+        UI.elements.discardDraftBtn.addEventListener('click', () => this.handleDiscard());
+    },
+
+    async loadProducts() {
+        try {
+            const res = await fetch(`${this.state.backendUrl}/api/shopify/products`);
+            if (!res.ok) throw new Error('Failed to load products');
+            const data = await res.json();
+            
+            const select = UI.elements.aiProductSelect;
+            if (!select) return;
+            
+            select.innerHTML = '<option value="">-- Select a Product --</option>';
+            if (data.products && data.products.length > 0) {
+                data.products.forEach(p => {
+                    const option = document.createElement('option');
+                    option.value = p.id;
+                    option.textContent = p.title;
+                    select.appendChild(option);
+                });
+            } else {
+                select.innerHTML = '<option value="">No products found</option>';
+            }
+        } catch (error) {
+            console.error('Error loading products:', error);
+            if (UI.elements.aiProductSelect) {
+                UI.elements.aiProductSelect.innerHTML = '<option value="">Error loading products</option>';
+            }
+        }
+    },
+
+    appendMessage(text, isUser = false) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `chat-message ${isUser ? 'user-message' : 'ai-message'}`;
+        msgDiv.textContent = text;
+        UI.elements.chatHistory.appendChild(msgDiv);
+        UI.elements.chatHistory.scrollTop = UI.elements.chatHistory.scrollHeight;
+    },
+
+    async handleSend() {
+        if (this.state.isProcessing) return;
+        
+        const productId = UI.elements.aiProductSelect.value;
+        if (!productId) {
+            this.appendMessage('Please select a target product from the dropdown first.', false);
+            return;
+        }
+
+        const text = UI.elements.aiChatInput.value.trim();
+        if (!text) return;
+
+        // UI Reset
+        UI.elements.aiChatInput.value = '';
+        this.appendMessage(text, true);
+        this.state.isProcessing = true;
+        this.appendMessage('Thinking...', false);
+
+        try {
+            // 1. Interpret
+            let res = await fetch(`${this.state.backendUrl}/api/interpret`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text })
+            });
+            
+            if (!res.ok) throw new Error('Backend server is not reachable');
+            const interpretData = await res.json();
+            
+            if (interpretData.error) throw new Error(interpretData.error);
+            
+            this.appendMessage(`Fetching product details...`, false);
+
+            // 2. Retrieval
+            res = await fetch(`${this.state.backendUrl}/api/shopify/product?id=${encodeURIComponent(productId)}`);
+            const productData = await res.json();
+
+            if (productData.error) throw new Error(productData.error);
+
+            this.appendMessage(`Found product! Generating draft...`, false);
+            
+            // Render original HTML
+            UI.elements.originalHtmlPreview.innerHTML = productData.body_html || '(Empty)';
+
+            // 3. Draft
+            res = await fetch(`${this.state.backendUrl}/api/draft`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    body_html: productData.body_html,
+                    raw_instructions: interpretData.raw_instructions,
+                    intent: interpretData.intent
+                })
+            });
+            const draftRes = await res.json();
+
+            if (draftRes.error) throw new Error(draftRes.error);
+
+            // Render draft HTML
+            UI.elements.draftHtmlPreview.innerHTML = draftRes.draft_html;
+            UI.elements.draftSection.classList.add('active');
+
+            // Save state
+            this.state.draftData = {
+                id: productData.id,
+                body_html: draftRes.draft_html
+            };
+
+            // Remove status messages
+            this.clearStatusMessages();
+            this.appendMessage('I have prepared a draft. Please review it on the right side and Approve or Discard.', false);
+
+        } catch (error) {
+            console.error(error);
+            this.clearStatusMessages();
+            this.appendMessage(`Error: ${error.message}`, false);
+        } finally {
+            this.state.isProcessing = false;
+        }
+    },
+
+    clearStatusMessages() {
+        const messages = UI.elements.chatHistory.querySelectorAll('.ai-message');
+        messages.forEach(msg => {
+            if (msg.textContent === 'Thinking...' || msg.textContent.startsWith('Fetching product') || msg.textContent === 'Found product! Generating draft...') {
+                msg.remove();
+            }
+        });
+    },
+
+    async handleApprove() {
+        if (!this.state.draftData || this.state.isProcessing) return;
+        this.state.isProcessing = true;
+        this.appendMessage('Pushing changes to Shopify...', false);
+
+        try {
+            const res = await fetch(`${this.state.backendUrl}/api/shopify/update`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.state.draftData)
+            });
+            const data = await res.json();
+
+            if (data.error) throw new Error(data.error);
+
+            this.clearStatusMessages();
+            this.appendMessage('Success! The changes have been pushed live to Shopify.', false);
+            this.resetDraftView();
+
+        } catch (error) {
+            console.error(error);
+            this.clearStatusMessages();
+            this.appendMessage(`Failed to push changes: ${error.message}`, false);
+        } finally {
+            this.state.isProcessing = false;
+        }
+    },
+
+    handleDiscard() {
+        this.appendMessage('Draft discarded, no changes made.', false);
+        this.resetDraftView();
+    },
+
+    resetDraftView() {
+        this.state.draftData = null;
+        UI.elements.draftSection.classList.remove('active');
+        UI.elements.originalHtmlPreview.innerHTML = '(No product selected)';
+        UI.elements.draftHtmlPreview.innerHTML = '(Awaiting draft)';
+    }
+};
+
+// ===========================================
 // UI Components
 // ===========================================
 const UI = {
@@ -652,7 +843,19 @@ const UI = {
             completedTasksList: document.getElementById('completedTasksList'),
             tasksEmptyState: document.getElementById('tasksEmptyState'),
             newTaskInput: document.getElementById('newTaskInput'),
-            addTaskBtn: document.getElementById('addTaskBtn')
+            addTaskBtn: document.getElementById('addTaskBtn'),
+
+            // AI Editor
+            aiEditorTab: document.getElementById('aiEditorTab'),
+            aiProductSelect: document.getElementById('aiProductSelect'),
+            chatHistory: document.getElementById('chatHistory'),
+            aiChatInput: document.getElementById('aiChatInput'),
+            aiSendBtn: document.getElementById('aiSendBtn'),
+            draftSection: document.getElementById('draftSection'),
+            originalHtmlPreview: document.getElementById('originalHtmlPreview'),
+            draftHtmlPreview: document.getElementById('draftHtmlPreview'),
+            approveDraftBtn: document.getElementById('approveDraftBtn'),
+            discardDraftBtn: document.getElementById('discardDraftBtn')
         };
 
         // Display version
@@ -947,18 +1150,11 @@ const UI = {
         });
 
         // Update tab content
-        if (tabName === 'bags') {
-            this.elements.bagsTab.classList.add('active');
-            this.elements.boxesTab.classList.remove('active');
-            this.elements.tasksTab.classList.remove('active');
-        } else if (tabName === 'boxes') {
-            this.elements.bagsTab.classList.remove('active');
-            this.elements.boxesTab.classList.add('active');
-            this.elements.tasksTab.classList.remove('active');
-        } else if (tabName === 'tasks') {
-            this.elements.bagsTab.classList.remove('active');
-            this.elements.boxesTab.classList.remove('active');
-            this.elements.tasksTab.classList.add('active');
+        this.elements.bagsTab.classList.toggle('active', tabName === 'bags');
+        this.elements.boxesTab.classList.toggle('active', tabName === 'boxes');
+        this.elements.tasksTab.classList.toggle('active', tabName === 'tasks');
+        if (this.elements.aiEditorTab) {
+            this.elements.aiEditorTab.classList.toggle('active', tabName === 'ai-editor');
         }
 
         this.updateUndoButton();
@@ -1060,6 +1256,9 @@ const Handlers = {
                 UI.switchTab(btn.dataset.tab);
             });
         });
+
+        // Initialize AI Editor
+        AIEditor.init();
 
         // Add task
         if (UI.elements.addTaskBtn) {
