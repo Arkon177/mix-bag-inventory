@@ -752,9 +752,143 @@ select option {
 }
 
 /* ===========================================
+   AI Editor Tab
+   =========================================== */
+.ai-editor-container {
+    display: flex;
+    gap: var(--spacing-lg);
+    min-height: 600px;
+    padding: var(--spacing-lg);
+}
+
+.chat-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color);
+    padding-right: var(--spacing-lg);
+}
+
+.chat-history {
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    padding-right: var(--spacing-sm);
+}
+
+.chat-message {
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    max-width: 85%;
+    line-height: 1.5;
+}
+
+.ai-message {
+    background: rgba(197, 169, 113, 0.15);
+    align-self: flex-start;
+    border-bottom-left-radius: 0;
+}
+
+.user-message {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--border-color);
+    align-self: flex-end;
+    border-bottom-right-radius: 0;
+}
+
+.chat-input-area {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: auto;
+}
+
+.draft-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    opacity: 0.5;
+    pointer-events: none;
+    transition: opacity var(--transition-base);
+}
+
+.draft-section.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.draft-preview-scroll {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    overflow-y: auto;
+    padding-right: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.preview-box h4 {
+    margin-bottom: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+}
+
+.html-preview {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    min-height: 150px;
+    overflow-x: auto;
+}
+
+.html-preview.draft-new {
+    border-color: var(--color-accent-primary);
+    background: rgba(197, 169, 113, 0.05);
+}
+
+.draft-actions {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-top: auto;
+}
+
+.draft-actions .btn {
+    flex: 1;
+}
+
+/* AI Editor Typography & Table within Preview */
+.html-preview table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1rem;
+}
+.html-preview th, .html-preview td {
+    border: 1px solid var(--border-color);
+    padding: 8px;
+    text-align: left;
+}
+.html-preview ul {
+    padding-left: 20px;
+}
+
+/* ===========================================
    Responsive Design
    =========================================== */
 @media (max-width: 768px) {
+    .ai-editor-container {
+        flex-direction: column;
+    }
+    .chat-section {
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        padding-right: 0;
+        padding-bottom: var(--spacing-lg);
+        min-height: 400px;
+    }
     .header-content {
         padding: var(--spacing-md);
         flex-wrap: wrap;
