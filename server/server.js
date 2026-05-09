@@ -253,8 +253,11 @@ app.post('/api/chat', async (req, res) => {
         const results = await Promise.all(fetches);
         const allTargetedOrders = results.flatMap(r => r.data.orders || []);
         
+        // Fix: De-duplicate orders by ID so we don't double-count
+        const uniqueOrders = Array.from(new Map(allTargetedOrders.map(o => [o.id, o])).values());
+        
         const stats = {};
-        allTargetedOrders.forEach(o => {
+        uniqueOrders.forEach(o => {
           o.line_items?.forEach(item => {
             if (item.product_id && matchedIds.includes(item.product_id.toString())) {
                 const name = item.title;
