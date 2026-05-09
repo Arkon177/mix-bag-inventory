@@ -245,9 +245,13 @@ app.post('/api/chat', async (req, res) => {
         const tOrders = targetOrdersRes.data.orders || [];
         let totalQty = 0;
         tOrders.forEach(o => {
-          o.line_items.forEach(item => {
-            if (item.product_id.toString() === matchedId) totalQty += item.quantity;
-          });
+          if (o.line_items) {
+            o.line_items.forEach(item => {
+              if (item.product_id && item.product_id.toString() === matchedId) {
+                totalQty += (item.quantity || 0);
+              }
+            });
+          }
         });
         dataContext.targeted_data = {
           name: products.find(p => p.id.toString() === matchedId)?.title,
