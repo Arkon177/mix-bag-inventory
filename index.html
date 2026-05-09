@@ -61,6 +61,9 @@
                 <button class="tab-btn" data-tab="tasks">
                     <span>✓</span> Tasks
                 </button>
+                <button class="tab-btn" data-tab="ai-editor">
+                    <span>🤖</span> AI Editor
+                </button>
             </div>
 
             <!-- Bags Tab -->
@@ -140,6 +143,56 @@
                         <ul class="task-list completed-list" id="completedTasksList">
                             <!-- Dynamic content -->
                         </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- AI Editor Tab -->
+            <section class="inventory-section tab-content" id="aiEditorTab">
+                <div class="ai-editor-container glass-card">
+                    <!-- Chat Side -->
+                    <div class="chat-section">
+                        <h3 class="tasks-header">🤖 AI Content Editor</h3>
+                        <div class="product-selector-container">
+                            <label for="aiProductSelect">Target Product:</label>
+                            <select id="aiProductSelect" class="form-input">
+                                <option value="">Loading products...</option>
+                            </select>
+                        </div>
+                        <div id="chatHistory" class="chat-history">
+                            <div class="chat-message ai-message">
+                                Hi! I'm your AI Content Editor. Select a product above and tell me what to update.
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <input type="text" id="aiChatInput" placeholder="e.g. Add a nutrition table to 'Strawberry Jam'" class="task-input">
+                            <button id="aiSendBtn" class="btn btn-primary">
+                                <span class="btn-icon">➤</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Draft Preview Side -->
+                    <div class="draft-section" id="draftSection">
+                        <h3 class="tasks-header">📝 Draft Preview</h3>
+                        <div class="draft-preview-scroll">
+                            <div class="preview-box">
+                                <h4>Original Content</h4>
+                                <div id="originalHtmlPreview" class="html-preview">
+                                    (No product selected)
+                                </div>
+                            </div>
+                            <div class="preview-box">
+                                <h4>New Draft Content</h4>
+                                <div id="draftHtmlPreview" class="html-preview draft-new">
+                                    (Awaiting draft)
+                                </div>
+                            </div>
+                        </div>
+                        <div class="draft-actions">
+                            <button id="discardDraftBtn" class="btn btn-danger">Discard</button>
+                            <button id="approveDraftBtn" class="btn btn-primary">Approve & Push Live</button>
+                        </div>
                     </div>
                 </div>
             </section>
