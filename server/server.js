@@ -213,96 +213,78 @@ app.post('/api/chat', async (req, res) => {
     const { message, history } = req.body;
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
-    // Step 1: Ask Gemini what data it needs to answer this question
-    const classifyPrompt = `
-You are a data classifier for a Shopify store assistant. 
-Given this user question, determine which Shopify data sources are needed to answer it.
-Output a valid JSON array containing only the needed sources from this list: ["orders", "products", "customers", "inventory"].
-Only include what is truly necessary. For general chat or greetings, return [].
+    console.log('Analyst processing question:', message);
 
-Question: "${message}"
-JSON Array:`;
-
+    // Step 1: Data Classification
+    const classifyPrompt = `Determine if this Shopify store question needs ["orders", "products", "customers", "inventory"]. Output ONLY a JSON array. Question: "${message}"`;
+    
     let neededData = [];
-    if (process.env.GEMINI_API_KEY) {
-      const classifyResult = await model.generateContent(classifyPrompt);
-      const classifyText = classifyResult.response.text();
-      const arrayMatch = classifyText.match(/\[[\s\S]*?\]/);
-      if (arrayMatch) neededData = JSON.parse(arrayMatch[0]);
+    try {
+      if (process.env.GEMINI_API_KEY) {
+        const classifyResult = await model.generateContent(classifyPrompt);
+        const classifyText = classifyResult.response.text();
+        const arrayMatch = classifyText.match(/\[[\s\S]*?\]/);
+        if (arrayMatch) neededData = JSON.parse(arrayMatch[0]);
+      }
+    } catch (err) {
+      console.warn('Classification failed, falling back to all data:', err);
+      neededData = ["orders", "products"]; // Default fallback
     }
 
-    // Step 2: Fetch all required data from Shopify in parallel
+    // Step 2: Fetch Data
     const dataContext = {};
-
     if (process.env.SHOPIFY_STORE_URL && process.env.SHOPIFY_ACCESS_TOKEN) {
       const fetches = [];
-
+      
       if (neededData.includes('orders')) {
         fetches.push(
-          axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&fields=id,created_at,total_price,line_items,customer`, {
+          axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=50&fields=created_at,total_price,line_items`, {
             headers: getShopifyHeaders()
-          }).then(r => { dataContext.orders = r.data.orders; })
-          .catch(() => { dataContext.orders = []; })
+          }).then(r => { dataContext.recent_orders = r.data.orders; })
+          .catch(e => console.error('Orders fetch failed:', e.message))
         );
       }
 
       if (neededData.includes('products')) {
         fetches.push(
-          axios.get(`${SHOPIFY_BASE_URL}/products.json?fields=id,title,product_type,status,variants&limit=250`, {
+          axios.get(`${SHOPIFY_BASE_URL}/products.json?limit=50&fields=title,product_type,variants`, {
             headers: getShopifyHeaders()
           }).then(r => { dataContext.products = r.data.products; })
-          .catch(() => { dataContext.products = []; })
+          .catch(e => console.error('Products fetch failed:', e.message))
         );
       }
 
       if (neededData.includes('customers')) {
         fetches.push(
-          axios.get(`${SHOPIFY_BASE_URL}/customers.json?limit=250&fields=id,first_name,last_name,email,orders_count,total_spent,last_order_id`, {
+          axios.get(`${SHOPIFY_BASE_URL}/customers.json?limit=50&fields=first_name,orders_count,total_spent`, {
             headers: getShopifyHeaders()
           }).then(r => { dataContext.customers = r.data.customers; })
-          .catch(() => { dataContext.customers = []; })
-        );
-      }
-
-      if (neededData.includes('inventory')) {
-        fetches.push(
-          axios.get(`${SHOPIFY_BASE_URL}/products.json?fields=id,title,variants&limit=250`, {
-            headers: getShopifyHeaders()
-          }).then(r => { dataContext.inventory = r.data.products; })
-          .catch(() => { dataContext.inventory = []; })
+          .catch(e => console.error('Customers fetch failed:', e.message))
         );
       }
 
       await Promise.all(fetches);
     }
 
-    // Step 3: Build final prompt with all the data and ask Gemini for a real answer
-    const dataSection = Object.keys(dataContext).length > 0
-      ? `\n\nHere is the live Shopify store data to help you answer:\n${JSON.stringify(dataContext, null, 2)}`
-      : '';
-
-    const conversationHistory = (history || []).map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`).join('\n');
-
+    // Step 3: Final Answer
+    const dataString = JSON.stringify(dataContext);
     const finalPrompt = `
-You are a friendly and concise AI Business Analyst for "Storybook Cakes Australia", a small cake mix business.
-Answer the user's question using the provided Shopify data. Be helpful, warm, and format your answer clearly.
-Use bullet points or numbered lists where appropriate. Keep answers concise but insightful.
-If no store data was provided, answer from general business knowledge and be honest that you don't have access to live data for that question.${dataSection}
+You are a helpful AI Analyst for Storybook Cakes Australia.
+Using this store data, answer the user's question clearly.
+Data: ${dataString.substring(0, 15000)} ${dataString.length > 15000 ? '... (truncated)' : ''}
+Question: ${message}
+Answer:`;
 
-${conversationHistory ? `Previous conversation:\n${conversationHistory}\n` : ''}
-User: ${message}
-Assistant:`;
-
-    let answer = "I'm sorry, I couldn't generate a response. Please check your Gemini API key.";
     if (process.env.GEMINI_API_KEY) {
-      const finalResult = await model.generateContent(finalPrompt);
-      answer = finalResult.response.text();
+      const result = await model.generateContent(finalPrompt);
+      res.json({ answer: result.response.text() });
+    } else {
+      res.json({ answer: "I can't see your data because the Gemini API key is missing. Please add it to Render!" });
     }
 
-    res.json({ answer });
   } catch (error) {
-    console.error('Error in /api/chat:', error);
-    res.status(500).json({ error: 'Failed to get a response from the AI Analyst.' });
+    console.error('CRITICAL ERROR in /api/chat:', error);
+    res.status(500).json({ error: `Analyst Error: ${error.message}` });
   }
 });
 
