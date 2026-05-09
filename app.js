@@ -588,7 +588,9 @@ const AIEditor = {
     state: {
         draftData: null,
         isProcessing: false,
-        backendUrl: 'http://localhost:3000'
+        backendUrl: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+            ? 'http://localhost:3000' 
+            : 'https://mix-bag-inventory.onrender.com'
     },
 
     init() {
