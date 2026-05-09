@@ -153,11 +153,29 @@
                     <!-- Chat Side -->
                     <div class="chat-section">
                         <h3 class="tasks-header">🤖 AI Content Editor</h3>
-                        <div class="product-selector-container">
+                        <div class="edit-mode-toggle" style="margin-bottom: 10px; display: flex; gap: 15px;">
+                            <label><input type="radio" name="aiEditMode" value="single" checked> Single Product</label>
+                            <label><input type="radio" name="aiEditMode" value="bulk"> Entire Category</label>
+                        </div>
+                        <div class="product-selector-container" id="singleProductSelector">
                             <label for="aiProductSelect">Target Product:</label>
                             <select id="aiProductSelect" class="form-input">
                                 <option value="">Loading products...</option>
                             </select>
+                        </div>
+                        <div class="product-selector-container" id="categorySelector" style="display: none;">
+                            <label for="aiCategorySelect">Target Category:</label>
+                            <select id="aiCategorySelect" class="form-input">
+                                <option value="">Loading categories...</option>
+                            </select>
+                        </div>
+                        <div id="aiProgressBarContainer" style="display: none; margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                <span id="aiProgressText" style="font-size: 0.9em; color: var(--text-secondary);">Drafting...</span>
+                            </div>
+                            <div style="width: 100%; background: var(--border-color); height: 8px; border-radius: 4px; overflow: hidden;">
+                                <div id="aiProgressBar" style="width: 0%; height: 100%; background: var(--accent-color); transition: width 0.3s ease;"></div>
+                            </div>
                         </div>
                         <div id="chatHistory" class="chat-history">
                             <div class="chat-message ai-message">
@@ -189,9 +207,18 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="draft-actions">
+                        <div class="draft-actions" id="singleDraftActions">
                             <button id="discardDraftBtn" class="btn btn-danger">Discard</button>
                             <button id="approveDraftBtn" class="btn btn-primary">Approve & Push Live</button>
+                        </div>
+                        <div class="draft-actions" id="bulkDraftActions" style="display: none; flex-direction: column; align-items: stretch; gap: 10px;">
+                            <div style="text-align: center; color: var(--text-secondary); font-size: 0.9em;">
+                                <span id="bulkDraftCount">0</span> products are ready to be updated.
+                            </div>
+                            <div style="display: flex; gap: 10px; width: 100%;">
+                                <button id="discardBulkBtn" class="btn btn-danger" style="flex: 1;">Discard All</button>
+                                <button id="approveBulkBtn" class="btn btn-primary" style="flex: 1;">Approve All</button>
+                            </div>
                         </div>
                     </div>
                 </div>
