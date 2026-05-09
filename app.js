@@ -954,6 +954,99 @@ const AIEditor = {
 };
 
 // ===========================================
+// AI Analyst Logic
+// ===========================================
+const AIAnalyst = {
+    state: {
+        isProcessing: false,
+        history: [],
+        backendUrl: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:3000'
+            : 'https://mix-bag-inventory.onrender.com'
+    },
+
+    init() {
+        if (!document.getElementById('analystSendBtn')) return;
+
+        document.getElementById('analystSendBtn').addEventListener('click', () => this.handleSend());
+        document.getElementById('analystChatInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.handleSend();
+        });
+
+        // Starter chips
+        document.querySelectorAll('.analyst-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                document.getElementById('analystChatInput').value = chip.dataset.prompt;
+                this.handleSend();
+            });
+        });
+    },
+
+    appendMessage(text, isUser = false) {
+        const chatHistory = document.getElementById('analystChatHistory');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `chat-message ${isUser ? 'user-message' : 'ai-message'}`;
+        if (!isUser) {
+            msgDiv.innerHTML = text
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/^### (.*$)/gm, '<strong>$1</strong>')
+                .replace(/^## (.*$)/gm, '<strong>$1</strong>')
+                .replace(/^# (.*$)/gm, '<strong>$1</strong>')
+                .replace(/^\* (.*$)/gm, '• $1')
+                .replace(/\n/g, '<br>');
+        } else {
+            msgDiv.textContent = text;
+        }
+        chatHistory.appendChild(msgDiv);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    },
+
+    async handleSend() {
+        if (this.state.isProcessing) return;
+        const input = document.getElementById('analystChatInput');
+        const text = input.value.trim();
+        if (!text) return;
+
+        input.value = '';
+        this.appendMessage(text, true);
+        this.state.isProcessing = true;
+
+        const thinkingDiv = document.createElement('div');
+        thinkingDiv.className = 'chat-message ai-message';
+        thinkingDiv.id = 'analystThinking';
+        thinkingDiv.textContent = '⏳ Looking at your store data...';
+        document.getElementById('analystChatHistory').appendChild(thinkingDiv);
+        document.getElementById('analystChatHistory').scrollTop = document.getElementById('analystChatHistory').scrollHeight;
+
+        try {
+            const res = await fetch(`${this.state.backendUrl}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text, history: this.state.history })
+            });
+
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+
+            document.getElementById('analystThinking')?.remove();
+            this.appendMessage(data.answer, false);
+
+            this.state.history.push({ role: 'user', text });
+            this.state.history.push({ role: 'assistant', text: data.answer });
+            if (this.state.history.length > 10) {
+                this.state.history = this.state.history.slice(-10);
+            }
+
+        } catch (error) {
+            document.getElementById('analystThinking')?.remove();
+            this.appendMessage(`Sorry, something went wrong: ${error.message}`, false);
+        } finally {
+            this.state.isProcessing = false;
+        }
+    }
+};
+
+// ===========================================
 // UI Components
 // ===========================================
 const UI = {
@@ -1028,6 +1121,7 @@ const UI = {
 
             // AI Editor
             aiEditorTab: document.getElementById('aiEditorTab'),
+            aiAnalystTab: document.getElementById('aiAnalystTab'),
             aiEditModeRadios: document.getElementsByName('aiEditMode'),
             singleProductSelector: document.getElementById('singleProductSelector'),
             categorySelector: document.getElementById('categorySelector'),
@@ -1349,6 +1443,9 @@ const UI = {
         if (this.elements.aiEditorTab) {
             this.elements.aiEditorTab.classList.toggle('active', tabName === 'ai-editor');
         }
+        if (this.elements.aiAnalystTab) {
+            this.elements.aiAnalystTab.classList.toggle('active', tabName === 'ai-analyst');
+        }
 
         this.updateUndoButton();
     },
@@ -1452,6 +1549,9 @@ const Handlers = {
 
         // Initialize AI Editor
         AIEditor.init();
+
+        // Initialize AI Analyst
+        AIAnalyst.init();
 
         // Add task
         if (UI.elements.addTaskBtn) {

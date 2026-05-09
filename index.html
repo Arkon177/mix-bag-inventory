@@ -64,6 +64,9 @@
                 <button class="tab-btn" data-tab="ai-editor">
                     <span>🤖</span> AI Editor
                 </button>
+                <button class="tab-btn" data-tab="ai-analyst">
+                    <span>💬</span> AI Analyst
+                </button>
             </div>
 
             <!-- Bags Tab -->
@@ -220,6 +223,39 @@
                                 <button id="approveBulkBtn" class="btn btn-primary" style="flex: 1;">Approve All</button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- AI Analyst Tab -->
+            <section class="inventory-section tab-content" id="aiAnalystTab">
+                <div class="ai-editor-container glass-card" style="flex-direction: column; max-width: 700px; margin: 0 auto; height: calc(100vh - 200px);">
+                    <h3 class="tasks-header" style="margin-bottom: 8px;">💬 AI Business Analyst</h3>
+                    <p style="color: var(--text-secondary); font-size: 0.85em; margin-bottom: 16px;">Ask me anything about your store — sales, products, customers, stock levels.</p>
+                    
+                    <!-- Starter Chips -->
+                    <div id="analystChips" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+                        <button class="analyst-chip" data-prompt="What were my top 5 best-selling products this month?">🏆 Top sellers this month</button>
+                        <button class="analyst-chip" data-prompt="Which products haven't sold recently and might need a discount?">💸 Slow-moving products</button>
+                        <button class="analyst-chip" data-prompt="How many orders did I get this month compared to last month?">📈 Orders comparison</button>
+                        <button class="analyst-chip" data-prompt="Which product categories are performing best?">📊 Category performance</button>
+                        <button class="analyst-chip" data-prompt="Do I have any customers who haven't ordered in over 2 months?">👥 Lapsed customers</button>
+                        <button class="analyst-chip" data-prompt="What is my total revenue this month?">💰 Revenue this month</button>
+                    </div>
+
+                    <!-- Chat History -->
+                    <div id="analystChatHistory" class="chat-history" style="flex: 1;">
+                        <div class="chat-message ai-message">
+                            Hi! I'm your AI Business Analyst. I can look at your orders, products, customers and more to answer any question about your store. What would you like to know?
+                        </div>
+                    </div>
+
+                    <!-- Input -->
+                    <div class="chat-input-area" style="margin-top: 12px;">
+                        <input type="text" id="analystChatInput" placeholder="e.g. What were my best sellers last month?" class="task-input">
+                        <button id="analystSendBtn" class="btn btn-primary">
+                            <span class="btn-icon">➤</span>
+                        </button>
                     </div>
                 </div>
             </section>

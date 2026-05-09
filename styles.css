@@ -805,6 +805,24 @@ select option {
     margin-top: auto;
 }
 
+.analyst-chip {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--accent-color);
+    background: rgba(197, 169, 113, 0.1);
+    color: var(--accent-color);
+    font-size: 0.8em;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    white-space: nowrap;
+}
+
+.analyst-chip:hover {
+    background: var(--accent-color);
+    color: #1a1a2e;
+    transform: translateY(-1px);
+}
+
 .draft-section {
     flex: 1;
     display: flex;

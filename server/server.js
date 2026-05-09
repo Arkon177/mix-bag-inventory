@@ -207,6 +207,105 @@ app.put('/api/shopify/update', async (req, res) => {
   }
 });
 
+// 5. AI Business Analyst Chat
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message, history } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message is required' });
+
+    // Step 1: Ask Gemini what data it needs to answer this question
+    const classifyPrompt = `
+You are a data classifier for a Shopify store assistant. 
+Given this user question, determine which Shopify data sources are needed to answer it.
+Output a valid JSON array containing only the needed sources from this list: ["orders", "products", "customers", "inventory"].
+Only include what is truly necessary. For general chat or greetings, return [].
+
+Question: "${message}"
+JSON Array:`;
+
+    let neededData = [];
+    if (process.env.GEMINI_API_KEY) {
+      const classifyResult = await model.generateContent(classifyPrompt);
+      const classifyText = classifyResult.response.text();
+      const arrayMatch = classifyText.match(/\[[\s\S]*?\]/);
+      if (arrayMatch) neededData = JSON.parse(arrayMatch[0]);
+    }
+
+    // Step 2: Fetch all required data from Shopify in parallel
+    const dataContext = {};
+
+    if (process.env.SHOPIFY_STORE_URL && process.env.SHOPIFY_ACCESS_TOKEN) {
+      const fetches = [];
+
+      if (neededData.includes('orders')) {
+        fetches.push(
+          axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&fields=id,created_at,total_price,line_items,customer`, {
+            headers: getShopifyHeaders()
+          }).then(r => { dataContext.orders = r.data.orders; })
+          .catch(() => { dataContext.orders = []; })
+        );
+      }
+
+      if (neededData.includes('products')) {
+        fetches.push(
+          axios.get(`${SHOPIFY_BASE_URL}/products.json?fields=id,title,product_type,status,variants&limit=250`, {
+            headers: getShopifyHeaders()
+          }).then(r => { dataContext.products = r.data.products; })
+          .catch(() => { dataContext.products = []; })
+        );
+      }
+
+      if (neededData.includes('customers')) {
+        fetches.push(
+          axios.get(`${SHOPIFY_BASE_URL}/customers.json?limit=250&fields=id,first_name,last_name,email,orders_count,total_spent,last_order_id`, {
+            headers: getShopifyHeaders()
+          }).then(r => { dataContext.customers = r.data.customers; })
+          .catch(() => { dataContext.customers = []; })
+        );
+      }
+
+      if (neededData.includes('inventory')) {
+        fetches.push(
+          axios.get(`${SHOPIFY_BASE_URL}/products.json?fields=id,title,variants&limit=250`, {
+            headers: getShopifyHeaders()
+          }).then(r => { dataContext.inventory = r.data.products; })
+          .catch(() => { dataContext.inventory = []; })
+        );
+      }
+
+      await Promise.all(fetches);
+    }
+
+    // Step 3: Build final prompt with all the data and ask Gemini for a real answer
+    const dataSection = Object.keys(dataContext).length > 0
+      ? `\n\nHere is the live Shopify store data to help you answer:\n${JSON.stringify(dataContext, null, 2)}`
+      : '';
+
+    const conversationHistory = (history || []).map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`).join('\n');
+
+    const finalPrompt = `
+You are a friendly and concise AI Business Analyst for "Storybook Cakes Australia", a small cake mix business.
+Answer the user's question using the provided Shopify data. Be helpful, warm, and format your answer clearly.
+Use bullet points or numbered lists where appropriate. Keep answers concise but insightful.
+If no store data was provided, answer from general business knowledge and be honest that you don't have access to live data for that question.${dataSection}
+
+${conversationHistory ? `Previous conversation:\n${conversationHistory}\n` : ''}
+User: ${message}
+Assistant:`;
+
+    let answer = "I'm sorry, I couldn't generate a response. Please check your Gemini API key.";
+    if (process.env.GEMINI_API_KEY) {
+      const finalResult = await model.generateContent(finalPrompt);
+      answer = finalResult.response.text();
+    }
+
+    res.json({ answer });
+  } catch (error) {
+    console.error('Error in /api/chat:', error);
+    res.status(500).json({ error: 'Failed to get a response from the AI Analyst.' });
+  }
+});
+
 app.listen(port, () => {
   console.log(`AI Content Editor backend running on port ${port}`);
 });
