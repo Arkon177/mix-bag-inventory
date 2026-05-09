@@ -210,68 +210,68 @@ app.put('/api/shopify/update', async (req, res) => {
 // 5. AI Business Analyst Chat
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, history } = req.body;
+    const { message } = req.body;
     if (!message) return res.status(400).json({ error: 'Message is required' });
 
     console.log('Analyst processing question:', message);
 
-    // Step 1: Data Classification
-    const classifyPrompt = `Determine if this Shopify store question needs ["orders", "products", "customers", "inventory"]. Output ONLY a JSON array. Question: "${message}"`;
-    
-    let neededData = [];
-    try {
-      if (process.env.GEMINI_API_KEY) {
-        const classifyResult = await model.generateContent(classifyPrompt);
-        const classifyText = classifyResult.response.text();
-        const arrayMatch = classifyText.match(/\[[\s\S]*?\]/);
-        if (arrayMatch) neededData = JSON.parse(arrayMatch[0]);
-      }
-    } catch (err) {
-      console.warn('Classification failed, falling back to all data:', err);
-      neededData = ["orders", "products"]; // Default fallback
-    }
+    // Step 1: Fetch Broad Data
+    const dataContext = {
+      summary: { total_orders: 0, total_revenue: 0, top_products: {} },
+      recent_activity: []
+    };
 
-    // Step 2: Fetch Data
-    const dataContext = {};
     if (process.env.SHOPIFY_STORE_URL && process.env.SHOPIFY_ACCESS_TOKEN) {
-      const fetches = [];
-      
-      if (neededData.includes('orders')) {
-        fetches.push(
-          axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=50&fields=created_at,total_price,line_items`, {
-            headers: getShopifyHeaders()
-          }).then(r => { dataContext.recent_orders = r.data.orders; })
-          .catch(e => console.error('Orders fetch failed:', e.message))
-        );
-      }
+      // 1. Get ALL orders from the last 60 days (or up to 250)
+      const ordersRes = await axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&fields=created_at,total_price,line_items`, {
+        headers: getShopifyHeaders()
+      });
+      const orders = ordersRes.data.orders || [];
 
-      if (neededData.includes('products')) {
-        fetches.push(
-          axios.get(`${SHOPIFY_BASE_URL}/products.json?limit=50&fields=title,product_type,variants`, {
-            headers: getShopifyHeaders()
-          }).then(r => { dataContext.products = r.data.products; })
-          .catch(e => console.error('Products fetch failed:', e.message))
-        );
-      }
+      // 2. Crunch the numbers
+      orders.forEach(order => {
+        dataContext.summary.total_orders++;
+        dataContext.summary.total_revenue += parseFloat(order.total_price);
+        
+        order.line_items.forEach(item => {
+          dataContext.summary.top_products[item.title] = (dataContext.summary.top_products[item.title] || 0) + item.quantity;
+        });
+      });
 
-      if (neededData.includes('customers')) {
-        fetches.push(
-          axios.get(`${SHOPIFY_BASE_URL}/customers.json?limit=50&fields=first_name,orders_count,total_spent`, {
-            headers: getShopifyHeaders()
-          }).then(r => { dataContext.customers = r.data.customers; })
-          .catch(e => console.error('Customers fetch failed:', e.message))
-        );
-      }
+      // 3. Keep a few recent ones for context
+      dataContext.recent_activity = orders.slice(0, 10).map(o => ({
+        date: o.created_at.split('T')[0],
+        total: o.total_price,
+        items: o.line_items.map(i => i.title).join(', ')
+      }));
 
-      await Promise.all(fetches);
+      // 4. Get product/stock info
+      const productsRes = await axios.get(`${SHOPIFY_BASE_URL}/products.json?limit=50&fields=title,variants`, {
+        headers: getShopifyHeaders()
+      });
+      dataContext.inventory = productsRes.data.products.map(p => ({
+        name: p.title,
+        stock: p.variants.reduce((acc, v) => acc + v.inventory_quantity, 0)
+      }));
     }
 
     // Step 3: Final Answer
-    const dataString = JSON.stringify(dataContext);
     const finalPrompt = `
-You are a helpful AI Analyst for Storybook Cakes Australia.
-Using this store data, answer the user's question clearly.
-Data: ${dataString.substring(0, 15000)} ${dataString.length > 15000 ? '... (truncated)' : ''}
+You are a expert Business Analyst for Storybook Cakes Australia.
+Analyze the following store data and answer the user's question. 
+Be specific with numbers! If they ask about "everything", use the "Summary" data provided.
+
+STORE SUMMARY:
+- Total Recent Orders: ${dataContext.summary.total_orders}
+- Total Recent Revenue: $${dataContext.summary.total_revenue.toFixed(2)}
+- Best Selling Items: ${JSON.stringify(dataContext.summary.top_products)}
+
+RECENT ACTIVITY (Last 10 orders):
+${JSON.stringify(dataContext.recent_activity)}
+
+INVENTORY LEVELS:
+${JSON.stringify(dataContext.inventory)}
+
 Question: ${message}
 Answer:`;
 
@@ -279,11 +279,11 @@ Answer:`;
       const result = await model.generateContent(finalPrompt);
       res.json({ answer: result.response.text() });
     } else {
-      res.json({ answer: "I can't see your data because the Gemini API key is missing. Please add it to Render!" });
+      res.json({ answer: "Gemini API key is missing in Render." });
     }
 
   } catch (error) {
-    console.error('CRITICAL ERROR in /api/chat:', error);
+    console.error('CRITICAL ERROR:', error);
     res.status(500).json({ error: `Analyst Error: ${error.message}` });
   }
 });
