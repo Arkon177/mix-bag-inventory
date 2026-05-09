@@ -80,7 +80,7 @@ app.get('/api/shopify/products', async (req, res) => {
         });
     }
 
-    const response = await axios.get(`${SHOPIFY_BASE_URL}/products.json?fields=id,title&limit=50`, {
+    const response = await axios.get(`${SHOPIFY_BASE_URL}/products.json?fields=id,title&limit=250`, {
       headers: getShopifyHeaders()
     });
 
