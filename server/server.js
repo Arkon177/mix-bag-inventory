@@ -244,7 +244,7 @@ app.post('/api/chat', async (req, res) => {
         
         // We'll fetch orders for the first 5 matched products to keep it fast
         const fetches = matchedIds.slice(0, 5).map(id => 
-            axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&product_id=${id}&fields=line_items`, {
+            axios.get(`${SHOPIFY_BASE_URL}/orders.json?status=any&limit=250&product_id=${id}&fields=id,line_items`, {
                 headers: getShopifyHeaders(),
                 timeout: 10000
             }).catch(() => ({ data: { orders: [] } }))
