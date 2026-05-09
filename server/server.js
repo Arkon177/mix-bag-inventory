@@ -253,9 +253,11 @@ app.post('/api/chat', async (req, res) => {
           name: products.find(p => p.id.toString() === matchedId)?.title,
           lifetime_sold: totalQty
         };
+        // Optimization: If we found what we wanted, skip the slow general scan!
+        return respondWithData(dataContext, message, res);
       }
 
-      // 4. General Scan (using cache if available)
+      // 4. General Scan (only if no targeted match)
       if (!global.analystCache) global.analystCache = { data: null, lastFetched: 0 };
       const now = Date.now();
       if (global.analystCache.data && (now - global.analystCache.lastFetched < 10 * 60 * 1000)) {
